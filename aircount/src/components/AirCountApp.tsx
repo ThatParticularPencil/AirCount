@@ -20,8 +20,9 @@ export type AirCountLineItem = {
 export type AirCountAppProps = {
   detections: AirCountDetection[]
   lineItems: AirCountLineItem[]
-  onRunTakeoff: () => Promise<void>
+  onRunTakeoff: (imageFile: File) => Promise<void>
   mockMode?: boolean
+  takeoffError?: string | null
 }
 
 function clamp(n: number, min: number, max: number) {
@@ -87,7 +88,7 @@ function UploadPanel({
       <div className="flex flex-1 flex-col gap-3 p-3">
         <div
           className={[
-            'relative flex flex-1 items-center justify-center border border-dashed border-[var(--ac-border)] bg-[rgba(11,31,54,0.65)]',
+            'relative flex flex-1 items-center justify-center border border-dashed border-[var(--ac-border)] bg-[var(--ac-subpanel)]',
             dragActive ? 'border-[var(--ac-accent)]' : '',
           ].join(' ')}
           onDragEnter={(e) => {
@@ -281,7 +282,7 @@ function DetectionPanel({
           )}
         </div>
 
-        <div className="flex items-center justify-between border border-[var(--ac-border)] bg-[rgba(11,31,54,0.65)] px-3 py-2 text-xs">
+        <div className="flex items-center justify-between border border-[var(--ac-border)] bg-[var(--ac-subpanel)] px-3 py-2 text-xs">
           <span className="text-[var(--ac-muted)]">
             Box coordinates accept normalized \([0..1]\) or pixel values.
           </span>
@@ -347,8 +348,10 @@ export default function AirCountApp({
   lineItems,
   onRunTakeoff,
   mockMode = false,
+  takeoffError = null,
 }: AirCountAppProps) {
   const [imageUrl, setImageUrl] = useState<string | null>(null)
+  const [imageFile, setImageFile] = useState<File | null>(null)
   const [running, setRunning] = useState(false)
 
   useEffect(() => {
@@ -366,7 +369,7 @@ export default function AirCountApp({
 
   return (
     <div className="flex h-full w-full flex-col">
-      <header className="flex items-center justify-between border-b border-[var(--ac-border)] bg-[rgba(11,31,54,0.65)] px-4 py-3">
+      <header className="flex items-center justify-between border-b border-[var(--ac-border)] bg-[var(--ac-header)] px-4 py-3">
         <div className="flex items-baseline gap-3">
           <div className="text-sm font-semibold tracking-[0.22em]">AIRCOUNT</div>
           <div className="text-xs text-[var(--ac-muted)]">
@@ -388,15 +391,16 @@ export default function AirCountApp({
 
           <button
             type="button"
-            disabled={running}
+            disabled={running || !imageFile}
             className={[
               'border border-[var(--ac-border)] bg-[rgba(125,211,252,0.08)] px-3 py-2 text-xs font-medium tracking-[0.12em] text-[var(--ac-text)]',
-              running ? 'opacity-60' : 'hover:border-[var(--ac-accent)]',
+              running || !imageFile ? 'opacity-60' : 'hover:border-[var(--ac-accent)]',
             ].join(' ')}
             onClick={async () => {
+              if (!imageFile) return
               try {
                 setRunning(true)
-                await onRunTakeoff()
+                await onRunTakeoff(imageFile)
               } finally {
                 setRunning(false)
               }
@@ -407,17 +411,25 @@ export default function AirCountApp({
         </div>
       </header>
 
+      {takeoffError ? (
+        <div className="border-b border-[var(--ac-danger)] bg-[rgba(251,113,133,0.12)] px-4 py-2 text-xs text-[var(--ac-danger)]">
+          {takeoffError}
+        </div>
+      ) : null}
+
       <main className="grid h-full flex-1 grid-cols-1 gap-0 md:grid-cols-3">
         <section className="min-h-0 border-r border-[var(--ac-border)] bg-[var(--ac-panel)]">
           <UploadPanel
             imageUrl={imageUrl}
             onPickFile={(file) => {
               if (imageUrl) URL.revokeObjectURL(imageUrl)
+              setImageFile(file)
               setImageUrl(URL.createObjectURL(file))
             }}
             onClear={() => {
               if (imageUrl) URL.revokeObjectURL(imageUrl)
               setImageUrl(null)
+              setImageFile(null)
             }}
           />
         </section>

@@ -3,14 +3,16 @@
 @tailwind utilities;
 
 :root {
-  --ac-bg: #071426; /* dark navy */
-  --ac-panel: #0b1f36;
-  --ac-border: #17324d;
-  --ac-text: #d3dde9;
-  --ac-muted: #91a4bb;
-  --ac-accent: #7dd3fc;
-  --ac-warn: #fbbf24;
-  --ac-danger: #fb7185;
+  --ac-bg: #ffffff;
+  --ac-panel: #f6f8fb;
+  --ac-header: #eef3f8;
+  --ac-subpanel: rgba(238, 243, 248, 0.7);
+  --ac-border: #c7d2e0;
+  --ac-text: #0b1726;
+  --ac-muted: #465a73;
+  --ac-accent: #0ea5e9;
+  --ac-warn: #b45309;
+  --ac-danger: #be123c;
   --ac-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
     'Courier New', monospace;
 }
@@ -28,5 +30,5 @@ body {
 }
 
 ::selection {
-  background: rgba(125, 211, 252, 0.25);
+  background: rgba(14, 165, 233, 0.22);
 }
