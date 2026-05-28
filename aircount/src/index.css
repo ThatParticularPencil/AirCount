@@ -32,3 +32,22 @@ body {
 ::selection {
   background: rgba(14, 165, 233, 0.22);
 }
+
+@keyframes acRowIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ac-row-in {
+  opacity: 0;
+  animation-name: acRowIn;
+  animation-duration: 240ms;
+  animation-timing-function: ease-out;
+  animation-fill-mode: forwards;
+}

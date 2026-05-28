@@ -58,30 +58,43 @@ function Kpi({ label, value }: { label: string; value: string }) {
 }
 
 function UploadPanel({
-  imageUrl,
-  onPickFile,
-  onClear,
+  files,
+  selectedId,
+  onAddFiles,
+  onSelect,
+  onRemove,
+  onClearAll,
 }: {
-  imageUrl: string | null
-  onPickFile: (file: File) => void
-  onClear: () => void
+  files: Array<{ id: string; name: string; url: string }>
+  selectedId: string | null
+  onAddFiles: (files: File[]) => void
+  onSelect: (id: string) => void
+  onRemove: (id: string) => void
+  onClearAll: () => void
 }) {
   const [dragActive, setDragActive] = useState(false)
   const inputRef = useRef<HTMLInputElement | null>(null)
+
+  const selected = files.find((f) => f.id === selectedId) ?? null
 
   return (
     <div className="flex h-full flex-col">
       <PanelHeader
         title="UPLOAD"
         right={
-          imageUrl ? (
-            <button
-              type="button"
-              className="border border-[var(--ac-border)] px-2 py-1 text-xs text-[var(--ac-text)] hover:border-[var(--ac-accent)]"
-              onClick={onClear}
-            >
-              Clear
-            </button>
+          files.length ? (
+            <div className="flex items-center gap-2">
+              <div className="text-[10px] tracking-[0.18em] text-[var(--ac-muted)]">
+                {files.length} FILES
+              </div>
+              <button
+                type="button"
+                className="border border-[var(--ac-border)] px-2 py-1 text-xs text-[var(--ac-text)] hover:border-[var(--ac-accent)]"
+                onClick={onClearAll}
+              >
+                Clear All
+              </button>
+            </div>
           ) : null
         }
       />
@@ -110,10 +123,11 @@ function UploadPanel({
             e.preventDefault()
             e.stopPropagation()
             setDragActive(false)
-            const file = e.dataTransfer.files?.[0]
-            if (!file) return
-            if (!/image\/(png|jpeg)/.test(file.type)) return
-            onPickFile(file)
+            const dropped = Array.from(e.dataTransfer.files ?? []).filter((f) =>
+              /image\/(png|jpeg)/.test(f.type),
+            )
+            if (!dropped.length) return
+            onAddFiles(dropped)
           }}
           onClick={() => inputRef.current?.click()}
           role="button"
@@ -126,25 +140,28 @@ function UploadPanel({
             ref={inputRef}
             type="file"
             accept="image/png,image/jpeg"
+            multiple
             className="hidden"
             onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (!file) return
-              onPickFile(file)
+              const picked = Array.from(e.target.files ?? []).filter((f) =>
+                /image\/(png|jpeg)/.test(f.type),
+              )
+              if (!picked.length) return
+              onAddFiles(picked)
               e.currentTarget.value = ''
             }}
           />
 
-          {imageUrl ? (
+          {selected ? (
             <div className="flex w-full flex-col gap-3">
               <div className="flex items-center justify-between text-xs text-[var(--ac-muted)]">
-                <span>Preview</span>
+                <span>Active</span>
                 <span>PNG/JPG</span>
               </div>
               <div className="border border-[var(--ac-border)] bg-black">
                 <img
-                  src={imageUrl}
-                  alt="Uploaded drawing"
+                  src={selected.url}
+                  alt={selected.name}
                   className="block h-[240px] w-full object-contain"
                   draggable={false}
                 />
@@ -166,6 +183,51 @@ function UploadPanel({
             </div>
           )}
         </div>
+
+        {files.length ? (
+          <div className="border border-[var(--ac-border)] bg-[var(--ac-subpanel)]">
+            <div className="grid grid-cols-3 gap-2 p-2">
+              {files.map((f) => {
+                const isActive = f.id === selectedId
+                return (
+                  <button
+                    key={f.id}
+                    type="button"
+                    className={[
+                      'group relative border border-[var(--ac-border)] bg-white p-1 text-left',
+                      isActive ? 'border-[var(--ac-accent)]' : 'hover:border-[var(--ac-accent)]',
+                    ].join(' ')}
+                    onClick={() => onSelect(f.id)}
+                    title={f.name}
+                  >
+                    <img
+                      src={f.url}
+                      alt={f.name}
+                      className="block h-16 w-full object-contain"
+                      draggable={false}
+                    />
+                    <div className="mt-1 truncate font-[var(--ac-mono)] text-[10px] text-[var(--ac-muted)]">
+                      {f.name}
+                    </div>
+                    <div className="absolute right-1 top-1 opacity-0 transition group-hover:opacity-100">
+                      <button
+                        type="button"
+                        className="border border-[var(--ac-border)] bg-[var(--ac-header)] px-1 py-0.5 text-[10px] text-[var(--ac-text)] hover:border-[var(--ac-danger)]"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          onRemove(f.id)
+                        }}
+                      >
+                        X
+                      </button>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   )
@@ -296,48 +358,85 @@ function DetectionPanel({
 }
 
 function QuoteTable({ lineItems }: { lineItems: AirCountLineItem[] }) {
+  const rows = useMemo(() => {
+    const mapping: Record<
+      string,
+      {
+        tag: 'SD-1' | 'RG-1' | 'SR-1'
+        description: string
+      }
+    > = {
+      'SD-1': { tag: 'SD-1', description: 'Supply Air Diffuser, Ceiling' },
+      'RG-1': { tag: 'RG-1', description: 'Return Air Grille, Ceiling' },
+      'SR-1': { tag: 'SR-1', description: 'Supply Air Register, Wall' },
+    }
+
+    const qtyBySymbol: Record<string, number> = { 'SD-1': 0, 'RG-1': 0, 'SR-1': 0 }
+    for (const li of lineItems) {
+      if (!mapping[li.symbol]) continue
+      qtyBySymbol[li.symbol] += Number.isFinite(li.qty) ? li.qty : 0
+    }
+
+    return (Object.keys(mapping) as Array<'SD-1' | 'RG-1' | 'SR-1'>).map((k) => ({
+      tag: mapping[k].tag,
+      description: mapping[k].description,
+      qty: qtyBySymbol[k] ?? 0,
+      unit: 'EA' as const,
+    }))
+  }, [lineItems])
+
+  const totalQty = useMemo(() => rows.reduce((acc, r) => acc + r.qty, 0), [rows])
+
   return (
     <div className="flex h-full flex-col">
       <PanelHeader
         title="QUOTE TABLE"
-        right={<Kpi label="Line Items" value={String(lineItems.length)} />}
+        right={<Kpi label="Total Qty" value={String(totalQty)} />}
       />
       <div className="flex-1 overflow-auto">
-        <table className="w-full border-collapse font-[var(--ac-mono)] text-xs">
-          <thead className="sticky top-0 bg-[var(--ac-panel)]">
-            <tr className="border-b border-[var(--ac-border)] text-left text-[var(--ac-muted)]">
-              <th className="px-3 py-2 font-medium tracking-[0.08em]">Symbol Type</th>
-              <th className="px-3 py-2 font-medium tracking-[0.08em]">Qty</th>
-              <th className="px-3 py-2 font-medium tracking-[0.08em]">Unit</th>
-              <th className="px-3 py-2 font-medium tracking-[0.08em]">Spec Section</th>
-              <th className="px-3 py-2 font-medium tracking-[0.08em]">
-                Line Item Description
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {lineItems.length ? (
-              lineItems.map((li, idx) => (
-                <tr
-                  key={`${li.symbol}-${idx}`}
-                  className="border-b border-[rgba(23,50,77,0.55)] hover:bg-[rgba(125,211,252,0.06)]"
-                >
-                  <td className="px-3 py-2 text-[var(--ac-text)]">{li.symbol}</td>
-                  <td className="px-3 py-2 text-[var(--ac-text)]">{li.qty}</td>
-                  <td className="px-3 py-2 text-[var(--ac-text)]">{li.unit}</td>
-                  <td className="px-3 py-2 text-[var(--ac-text)]">{li.spec}</td>
-                  <td className="px-3 py-2 text-[var(--ac-text)]">{li.description}</td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td className="px-3 py-4 text-[var(--ac-muted)]" colSpan={5}>
-                  No line items.
-                </td>
+        {lineItems.length === 0 ? (
+          <div className="flex h-full items-center justify-center px-6 text-center font-[var(--ac-mono)] text-xs text-[var(--ac-muted)]">
+            Run takeoff to generate quote
+          </div>
+        ) : (
+          <table className="w-full border-collapse font-[var(--ac-mono)] text-xs">
+            <thead className="sticky top-0 bg-[var(--ac-panel)]">
+              <tr className="border-b border-[var(--ac-border)] text-left text-[var(--ac-muted)]">
+                <th className="px-3 py-2 font-medium tracking-[0.08em]">Tag</th>
+                <th className="px-3 py-2 font-medium tracking-[0.08em]">Description</th>
+                <th className="px-3 py-2 font-medium tracking-[0.08em]">Qty</th>
+                <th className="px-3 py-2 font-medium tracking-[0.08em]">Unit</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((r, idx) => (
+                <tr
+                  key={r.tag}
+                  className={[
+                    'ac-row-in border-b border-[rgba(11,23,38,0.12)]',
+                    idx % 2 === 0 ? 'bg-white' : 'bg-[rgba(14,165,233,0.035)]',
+                  ].join(' ')}
+                  style={{ animationDelay: `${idx * 100}ms` }}
+                >
+                  <td className="px-3 py-2 text-[var(--ac-text)]">{r.tag}</td>
+                  <td className="px-3 py-2 text-[var(--ac-text)]">{r.description}</td>
+                  <td className="px-3 py-2 text-[var(--ac-text)]">{r.qty}</td>
+                  <td className="px-3 py-2 text-[var(--ac-text)]">{r.unit}</td>
+                </tr>
+              ))}
+
+              <tr
+                className="ac-row-in border-t-2 border-[var(--ac-text)] bg-white font-semibold"
+                style={{ animationDelay: `${rows.length * 100}ms` }}
+              >
+                <td className="px-3 py-2 text-[var(--ac-text)]">TOTAL DEVICES</td>
+                <td className="px-3 py-2 text-[var(--ac-text)]"></td>
+                <td className="px-3 py-2 text-[var(--ac-text)]">{totalQty}</td>
+                <td className="px-3 py-2 text-[var(--ac-text)]">EA</td>
+              </tr>
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   )
@@ -350,15 +449,19 @@ export default function AirCountApp({
   mockMode = false,
   takeoffError = null,
 }: AirCountAppProps) {
-  const [imageUrl, setImageUrl] = useState<string | null>(null)
-  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [uploads, setUploads] = useState<Array<{ id: string; file: File; url: string }>>([])
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
 
   useEffect(() => {
     return () => {
-      if (imageUrl) URL.revokeObjectURL(imageUrl)
+      for (const u of uploads) URL.revokeObjectURL(u.url)
     }
-  }, [imageUrl])
+  }, [uploads])
+
+  const selectedUpload = uploads.find((u) => u.id === selectedId) ?? uploads[uploads.length - 1] ?? null
+  const activeFile = selectedUpload?.file ?? null
+  const activeUrl = selectedUpload?.url ?? null
 
   const topStats = useMemo(() => {
     const det = detections.length
@@ -372,9 +475,6 @@ export default function AirCountApp({
       <header className="flex items-center justify-between border-b border-[var(--ac-border)] bg-[var(--ac-header)] px-4 py-3">
         <div className="flex items-baseline gap-3">
           <div className="text-sm font-semibold tracking-[0.22em]">AIRCOUNT</div>
-          <div className="text-xs text-[var(--ac-muted)]">
-            Single-page takeoff workspace
-          </div>
           {mockMode ? (
             <div className="border border-[var(--ac-border)] px-2 py-1 text-[10px] tracking-[0.18em] text-[var(--ac-muted)]">
               MOCK MODE
@@ -391,16 +491,16 @@ export default function AirCountApp({
 
           <button
             type="button"
-            disabled={running || !imageFile}
+            disabled={running || !activeFile}
             className={[
               'border border-[var(--ac-border)] bg-[rgba(125,211,252,0.08)] px-3 py-2 text-xs font-medium tracking-[0.12em] text-[var(--ac-text)]',
-              running || !imageFile ? 'opacity-60' : 'hover:border-[var(--ac-accent)]',
+              running || !activeFile ? 'opacity-60' : 'hover:border-[var(--ac-accent)]',
             ].join(' ')}
             onClick={async () => {
-              if (!imageFile) return
+              if (!activeFile) return
               try {
                 setRunning(true)
-                await onRunTakeoff(imageFile)
+                await onRunTakeoff(activeFile)
               } finally {
                 setRunning(false)
               }
@@ -420,22 +520,40 @@ export default function AirCountApp({
       <main className="grid h-full flex-1 grid-cols-1 gap-0 md:grid-cols-3">
         <section className="min-h-0 border-r border-[var(--ac-border)] bg-[var(--ac-panel)]">
           <UploadPanel
-            imageUrl={imageUrl}
-            onPickFile={(file) => {
-              if (imageUrl) URL.revokeObjectURL(imageUrl)
-              setImageFile(file)
-              setImageUrl(URL.createObjectURL(file))
+            files={uploads.map((u) => ({ id: u.id, name: u.file.name, url: u.url }))}
+            selectedId={selectedUpload?.id ?? null}
+            onAddFiles={(files) => {
+              const next = files.map((file) => ({
+                id: `${crypto.randomUUID?.() ?? String(Date.now())}-${file.name}`,
+                file,
+                url: URL.createObjectURL(file),
+              }))
+              setUploads((prev) => [...prev, ...next])
+              const last = next[next.length - 1]
+              if (last) setSelectedId(last.id)
             }}
-            onClear={() => {
-              if (imageUrl) URL.revokeObjectURL(imageUrl)
-              setImageUrl(null)
-              setImageFile(null)
+            onSelect={(id) => setSelectedId(id)}
+            onRemove={(id) => {
+              setUploads((prev) => {
+                const victim = prev.find((p) => p.id === id)
+                if (victim) URL.revokeObjectURL(victim.url)
+                const next = prev.filter((p) => p.id !== id)
+                const nextSelected =
+                  selectedId === id ? (next[next.length - 1]?.id ?? null) : selectedId
+                setSelectedId(nextSelected)
+                return next
+              })
+            }}
+            onClearAll={() => {
+              for (const u of uploads) URL.revokeObjectURL(u.url)
+              setUploads([])
+              setSelectedId(null)
             }}
           />
         </section>
 
         <section className="min-h-0 border-r border-[var(--ac-border)] bg-[var(--ac-panel)]">
-          <DetectionPanel imageUrl={imageUrl} detections={detections} />
+          <DetectionPanel imageUrl={activeUrl} detections={detections} />
         </section>
 
         <section className="min-h-0 bg-[var(--ac-panel)]">
