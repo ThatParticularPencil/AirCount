@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ac-bg: #071426; /* dark navy */
+  --ac-panel: #0b1f36;
+  --ac-border: #17324d;
+  --ac-text: #d3dde9;
+  --ac-muted: #91a4bb;
+  --ac-accent: #7dd3fc;
+  --ac-warn: #fbbf24;
+  --ac-danger: #fb7185;
+  --ac-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ac-bg);
+  color: var(--ac-text);
+}
+
+::selection {
+  background: rgba(125, 211, 252, 0.25);
+}
