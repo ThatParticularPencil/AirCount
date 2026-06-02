@@ -1,5 +1,149 @@
-const ROBOFLOW_PATH = '/hvac-mechanical-2/3'
-const ROBOFLOW_API_KEY = 'NWbqS9yO8GSLFBw249JQ'
+export const SYMBOL_DESCRIPTIONS = {
+  'SD-1': 'Supply Air Diffuser 1, 10" Ceiling, 300 CFM',
+  'RG-1': 'Return Air Grille, 10" Ceiling',
+  'EG-2': 'Exhaust Air Grille 1, Ceiling, 800 CFM',
+  'SR-1': 'Supply Air Register, Wall, 45 deg Branch Duct',
+} as const
+
+export type SymbolTag = keyof typeof SYMBOL_DESCRIPTIONS
+
+export const SYMBOL_TAGS: SymbolTag[] = ['SD-1', 'RG-1', 'EG-2', 'SR-1']
+
+/** Roboflow / LLM class strings that map to a quote-table tag (keys are canonicalized) */
+const SYMBOL_ALIASES: Record<string, SymbolTag> = {
+  CSD: 'SD-1',
+  'CSD-1': 'SD-1',
+  CSD1: 'SD-1',
+  SD: 'SD-1',
+  'SD-1': 'SD-1',
+  SD1: 'SD-1',
+  'SD 1': 'SD-1',
+  SUPPLY: 'SD-1',
+  SUPPLYAIRDIFFUSER: 'SD-1',
+  SUPPLYDIFFUSER: 'SD-1',
+  DIFFUSER: 'SD-1',
+  RG: 'RG-1',
+  'RG-1': 'RG-1',
+  RG1: 'RG-1',
+  'RG 1': 'RG-1',
+  RETURN: 'RG-1',
+  RETURNAIRGRILLE: 'RG-1',
+  GRILLE: 'RG-1',
+  EG: 'EG-2',
+  'EG-2': 'EG-2',
+  EG2: 'EG-2',
+  'EG 2': 'EG-2',
+  EXHAUST: 'EG-2',
+  SR: 'SR-1',
+  'SR-1': 'SR-1',
+  SR1: 'SR-1',
+  'SR 1': 'SR-1',
+  REGISTER: 'SR-1',
+}
+
+function canonicalizeClassKey(raw: string): string {
+  return raw
+    .trim()
+    .replace(/[\u2010-\u2015–—]/g, '-')
+    .replace(/_/g, '-')
+    .replace(/\s+/g, ' ')
+    .toUpperCase()
+}
+
+function compactClassKey(raw: string): string {
+  return canonicalizeClassKey(raw).replace(/[\s-]/g, '')
+}
+
+export function normalizeSymbolTag(raw: string): SymbolTag | null {
+  if (!raw?.trim()) return null
+
+  const canonical = canonicalizeClassKey(raw)
+  const compact = compactClassKey(raw)
+
+  for (const tag of SYMBOL_TAGS) {
+    if (canonicalizeClassKey(tag) === canonical) return tag
+    if (compactClassKey(tag) === compact) return tag
+  }
+
+  if (canonical in SYMBOL_ALIASES) return SYMBOL_ALIASES[canonical]
+  if (compact in SYMBOL_ALIASES) return SYMBOL_ALIASES[compact]
+
+  // Fuzzy fallbacks for Roboflow labels that don't match drawing notation exactly
+  if (
+    compact.includes('CSD') ||
+    compact.startsWith('SD') ||
+    canonical.includes('DIFFUSER') ||
+    canonical.includes('SUPPLY')
+  ) {
+    return 'SD-1'
+  }
+  if (compact.startsWith('RG') || canonical.includes('RETURN') || canonical.includes('GRILLE')) {
+    return 'RG-1'
+  }
+  if (compact.startsWith('EG') || canonical.includes('EXHAUST')) {
+    return 'EG-2'
+  }
+  if (compact.startsWith('SR') || canonical.includes('REGISTER')) {
+    return 'SR-1'
+  }
+
+  return null
+}
+
+function getPredictionClassName(raw: Record<string, unknown>): string {
+  const name = raw.class ?? raw.class_name ?? raw.name
+  if (typeof name === 'string' && name.trim()) return name.trim()
+  if (typeof raw.class_id === 'number') return `class_${raw.class_id}`
+  return 'unknown'
+}
+
+function parseRoboflowPrediction(raw: Record<string, unknown>): RoboflowPrediction {
+  return {
+    class: getPredictionClassName(raw),
+    confidence: Number(raw.confidence ?? 0),
+    x: Number(raw.x ?? 0),
+    y: Number(raw.y ?? 0),
+    width: Number(raw.width ?? 0),
+    height: Number(raw.height ?? 0),
+  }
+}
+
+export function quoteQtyByTagFromCounts(
+  counts: Record<string, number>,
+): Record<SymbolTag, number> {
+  const qty = Object.fromEntries(SYMBOL_TAGS.map((t) => [t, 0])) as Record<SymbolTag, number>
+  for (const [cls, n] of Object.entries(counts)) {
+    const tag = normalizeSymbolTag(cls)
+    if (tag && Number.isFinite(n)) qty[tag] += n
+  }
+  return qty
+}
+
+export function quoteQtyByTagFromDetections(
+  detections: Array<{ label: string }>,
+): Record<SymbolTag, number> {
+  const counts: Record<string, number> = {}
+  for (const d of detections) {
+    counts[d.label] = (counts[d.label] ?? 0) + 1
+  }
+  return quoteQtyByTagFromCounts(counts)
+}
+
+export type RoboflowModelId = 'production' | 'experimental'
+
+export const ROBOFLOW_MODELS: Record<
+  RoboflowModelId,
+  { path: string; label: string }
+> = {
+  production: {
+    path: '/hvac-mechanical-2/2',
+    label: 'v2',
+  },
+  experimental: {
+    path: '/hvac-mechanical-2/3',
+    label: 'v3 (exp)',
+  },
+}
 
 const CLAUDE_PATH = '/v1/messages'
 const CLAUDE_MODEL = 'claude-sonnet-4-20250514'
@@ -12,10 +156,10 @@ into contractor quote line items. Return ONLY a valid JSON array,
 no explanation, no markdown.
 
 Symbol mapping:
-- SD-1 → Supply Air Diffuser, Ceiling, Sec. 23.37.00
-- RG-1 → Return Air Grille, Ceiling, Sec. 23.37.00
-- EG-2 → Exhaust Air Grille, Ceiling, Sec. 23.37.00
-- SR-1 → Supply Air Register, Wall, Sec. 23.37.00
+- SD-1 → Supply Air Diffuser 1, 10" Ceiling, 300 CFM
+- RG-1 → Return Air Grille, 10" Ceiling
+- EG-2 → Exhaust Air Grille 1, Ceiling, 800 CFM
+- SR-1 → Supply Air Register, Wall, 45 deg Branch Duct
 
 Output format:
 [{
@@ -115,14 +259,23 @@ function toTopLeftBox(
   }
 }
 
-async function detectWithRoboflow(base64: string): Promise<RoboflowResponse> {
+async function detectWithRoboflow(
+  base64: string,
+  modelId: RoboflowModelId,
+): Promise<RoboflowResponse> {
+  const apiKey = import.meta.env.VITE_ROBOFLOW_API_KEY
+  if (!apiKey) {
+    throw new Error('Missing VITE_ROBOFLOW_API_KEY — add it to your .env file')
+  }
+
+  const { path } = ROBOFLOW_MODELS[modelId]
   const baseUrl = import.meta.env.DEV
-    ? `/api/roboflow${ROBOFLOW_PATH}`
-    : `https://serverless.roboflow.com${ROBOFLOW_PATH}`
+    ? `/api/roboflow${path}`
+    : `https://serverless.roboflow.com${path}`
 
   // Roboflow serverless expects the api_key as a query param (like axios `params`)
   // and the base64 image in the POST body with x-www-form-urlencoded content-type.
-  const url = `${baseUrl}?api_key=${encodeURIComponent(ROBOFLOW_API_KEY)}`
+  const url = `${baseUrl}?api_key=${encodeURIComponent(apiKey)}`
 
   const res = await fetch(url, {
     method: 'POST',
@@ -135,7 +288,14 @@ async function detectWithRoboflow(base64: string): Promise<RoboflowResponse> {
     throw new Error(`Roboflow request failed (${res.status}): ${detail || res.statusText}`)
   }
 
-  return (await res.json()) as RoboflowResponse
+  const data = (await res.json()) as RoboflowResponse & {
+    predictions?: Array<Record<string, unknown>>
+  }
+
+  return {
+    ...data,
+    predictions: (data.predictions ?? []).map((p) => parseRoboflowPrediction(p)),
+  }
 }
 
 function parseClaudeJsonArray(text: string): ClaudeLineItem[] {
@@ -257,12 +417,17 @@ async function quoteLineItems(symbolCounts: Record<string, number>): Promise<Tak
   return quoteWithClaude(symbolCounts)
 }
 
-export async function runTakeoff(imageFile: File): Promise<{
+export async function runTakeoff(
+  imageFile: File,
+  modelId: RoboflowModelId = 'production',
+): Promise<{
   predictions: TakeoffPrediction[]
   lineItems: TakeoffLineItem[]
+  qtyByTag: Record<SymbolTag, number>
+  rawClassCounts: Record<string, number>
 }> {
   const base64 = await fileToBase64(imageFile)
-  const roboflow = await detectWithRoboflow(base64)
+  const roboflow = await detectWithRoboflow(base64, modelId)
   const rawPredictions = roboflow.predictions ?? []
 
   const imageWidth = roboflow.image?.width
@@ -270,7 +435,19 @@ export async function runTakeoff(imageFile: File): Promise<{
   const predictions = rawPredictions.map((p) => toTopLeftBox(p, imageWidth, imageHeight))
 
   const symbolCounts = countByClass(rawPredictions)
-  const lineItems = await quoteLineItems(symbolCounts)
+  const qtyByTag = quoteQtyByTagFromCounts(symbolCounts)
 
-  return { predictions, lineItems }
+  const llmItems = await quoteLineItems(symbolCounts)
+  const lineItems: TakeoffLineItem[] = SYMBOL_TAGS.map((tag) => {
+    const llm = llmItems.find((li) => normalizeSymbolTag(li.symbol) === tag)
+    return {
+      symbol: tag,
+      description: llm?.description ?? SYMBOL_DESCRIPTIONS[tag],
+      quantity: qtyByTag[tag],
+      unit: llm?.unit ?? 'EA',
+      spec: llm?.spec ?? '',
+    }
+  })
+
+  return { predictions, lineItems, qtyByTag, rawClassCounts: symbolCounts }
 }

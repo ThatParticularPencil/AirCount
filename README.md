@@ -35,6 +35,7 @@ npm install
 Environment variables (create `aircount/.env`):
 
 ```bash
+VITE_ROBOFLOW_API_KEY=your_roboflow_key_here
 VITE_LLM_PROVIDER=anthropic
 VITE_ANTHROPIC_API_KEY=your_key_here
 

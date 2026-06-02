@@ -1,4 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  ROBOFLOW_MODELS,
+  SYMBOL_DESCRIPTIONS,
+  SYMBOL_TAGS,
+  type RoboflowModelId,
+  type SymbolTag,
+} from '../api/takeoff'
 
 export type AirCountDetection = {
   label: string
@@ -20,6 +27,10 @@ export type AirCountLineItem = {
 export type AirCountAppProps = {
   detections: AirCountDetection[]
   lineItems: AirCountLineItem[]
+  qtyByTag: Record<SymbolTag, number>
+  rawClassCounts: Record<string, number>
+  modelId: RoboflowModelId
+  onModelChange: (id: RoboflowModelId) => void
   onRunTakeoff: (imageFile: File) => Promise<void>
   mockMode?: boolean
   takeoffError?: string | null
@@ -178,7 +189,6 @@ function UploadPanel({
               </div>
               <div className="mt-2 inline-flex items-center gap-2 text-xs text-[var(--ac-muted)]">
                 <span className="h-2 w-2 border border-[var(--ac-border)]" />
-                Sharp edges, no rounding.
               </div>
             </div>
           )}
@@ -357,33 +367,31 @@ function DetectionPanel({
   )
 }
 
-function QuoteTable({ lineItems }: { lineItems: AirCountLineItem[] }) {
+function QuoteTable({
+  lineItems,
+  qtyByTag,
+  rawClassCounts,
+}: {
+  lineItems: AirCountLineItem[]
+  qtyByTag: Record<SymbolTag, number>
+  rawClassCounts: Record<string, number>
+}) {
   const rows = useMemo(() => {
-    const mapping: Record<
-      string,
-      {
-        tag: 'SD-1' | 'RG-1' | 'SR-1'
-        description: string
-      }
-    > = {
-      'SD-1': { tag: 'SD-1', description: 'Supply Air Diffuser, Ceiling' },
-      'RG-1': { tag: 'RG-1', description: 'Return Air Grille, Ceiling' },
-      'SR-1': { tag: 'SR-1', description: 'Supply Air Register, Wall' },
-    }
-
-    const qtyBySymbol: Record<string, number> = { 'SD-1': 0, 'RG-1': 0, 'SR-1': 0 }
-    for (const li of lineItems) {
-      if (!mapping[li.symbol]) continue
-      qtyBySymbol[li.symbol] += Number.isFinite(li.qty) ? li.qty : 0
-    }
-
-    return (Object.keys(mapping) as Array<'SD-1' | 'RG-1' | 'SR-1'>).map((k) => ({
-      tag: mapping[k].tag,
-      description: mapping[k].description,
-      qty: qtyBySymbol[k] ?? 0,
+    return SYMBOL_TAGS.map((tag) => ({
+      tag,
+      description: SYMBOL_DESCRIPTIONS[tag],
+      qty: qtyByTag[tag] ?? 0,
       unit: 'EA' as const,
     }))
-  }, [lineItems])
+  }, [qtyByTag])
+
+  const rawClassSummary = useMemo(
+    () =>
+      Object.entries(rawClassCounts)
+        .map(([cls, n]) => `${cls} (${n})`)
+        .join(', '),
+    [rawClassCounts],
+  )
 
   const totalQty = useMemo(() => rows.reduce((acc, r) => acc + r.qty, 0), [rows])
 
@@ -437,7 +445,45 @@ function QuoteTable({ lineItems }: { lineItems: AirCountLineItem[] }) {
             </tbody>
           </table>
         )}
+        {lineItems.length > 0 && rawClassSummary ? (
+          <div className="border-t border-[var(--ac-border)] px-3 py-2 font-[var(--ac-mono)] text-[10px] text-[var(--ac-muted)]">
+            Roboflow classes: {rawClassSummary}
+          </div>
+        ) : null}
       </div>
+    </div>
+  )
+}
+
+function ModelToggle({
+  modelId,
+  onModelChange,
+}: {
+  modelId: RoboflowModelId
+  onModelChange: (id: RoboflowModelId) => void
+}) {
+  const options: RoboflowModelId[] = ['production', 'experimental']
+
+  return (
+    <div className="flex border border-[var(--ac-border)]">
+      {options.map((id) => {
+        const active = modelId === id
+        return (
+          <button
+            key={id}
+            type="button"
+            onClick={() => onModelChange(id)}
+            className={[
+              'px-2 py-2 text-xs font-medium tracking-[0.08em]',
+              active
+                ? 'bg-[rgba(14,165,233,0.12)] text-[var(--ac-text)]'
+                : 'bg-white text-[var(--ac-muted)] hover:text-[var(--ac-text)]',
+            ].join(' ')}
+          >
+            {ROBOFLOW_MODELS[id].label}
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -445,6 +491,10 @@ function QuoteTable({ lineItems }: { lineItems: AirCountLineItem[] }) {
 export default function AirCountApp({
   detections,
   lineItems,
+  qtyByTag,
+  rawClassCounts,
+  modelId,
+  onModelChange,
   onRunTakeoff,
   mockMode = false,
   takeoffError = null,
@@ -466,9 +516,9 @@ export default function AirCountApp({
   const topStats = useMemo(() => {
     const det = detections.length
     const items = lineItems.length
-    const totalQty = lineItems.reduce((acc, li) => acc + (Number.isFinite(li.qty) ? li.qty : 0), 0)
+    const totalQty = SYMBOL_TAGS.reduce((acc, tag) => acc + (qtyByTag[tag] ?? 0), 0)
     return { det, items, totalQty }
-  }, [detections, lineItems])
+  }, [detections, lineItems, qtyByTag])
 
   return (
     <div className="flex h-full w-full flex-col">
@@ -484,10 +534,13 @@ export default function AirCountApp({
 
         <div className="flex items-center gap-4">
           <div className="hidden items-center gap-4 md:flex">
+            <Kpi label="Model" value={ROBOFLOW_MODELS[modelId].label} />
             <Kpi label="Detections" value={String(topStats.det)} />
             <Kpi label="Items" value={String(topStats.items)} />
             <Kpi label="Total Qty" value={String(topStats.totalQty)} />
           </div>
+
+          <ModelToggle modelId={modelId} onModelChange={onModelChange} />
 
           <button
             type="button"
@@ -557,7 +610,11 @@ export default function AirCountApp({
         </section>
 
         <section className="min-h-0 bg-[var(--ac-panel)]">
-          <QuoteTable lineItems={lineItems} />
+          <QuoteTable
+            lineItems={lineItems}
+            qtyByTag={qtyByTag}
+            rawClassCounts={rawClassCounts}
+          />
         </section>
       </main>
     </div>
